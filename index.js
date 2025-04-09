@@ -1,168 +1,123 @@
-const puppeteer = require('puppeteer-extra');
-const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha')
-const StealthPlugin = require('puppeteer-extra-plugin-stealth')
-require('dotenv').config()
+const puppeteerExtra = require('puppeteer-extra');
+const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha');
+require('dotenv').config();
 
-puppeteer.use(StealthPlugin())
-puppeteer.use(
-    RecaptchaPlugin({
-        provider: {
-            id: '2captcha',
-            token: process.env.TWO_CAPTCHA_KEY
-        },
-        visualFeedback: true,
-        throwOnError: true
-    })
-)
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-function delay(time) {
-    return new Promise(function (resolve) {
-        setTimeout(resolve, time)
-    });
-}
+// Add the Recaptcha plugin to puppeteerExtra
+puppeteerExtra.use(RecaptchaPlugin({
+    provider: { id: '2captcha', token: process.env.TWO_CAPTCHA_KEY },
+    visualFeedback: true,
+}));
 
-async function linkOffers() {
-    const browser = await puppeteer.launch({
+(async () => {
+    // Launch the browser with puppeteerExtra
+    const browser = await puppeteerExtra.launch({
         headless: false,
         defaultViewport: null,
-        args: [
-            '--start-maximized',
-            '--app=https://www.rakuten.com/in-store.htm',
-            '--disable-features=IsolateOrigins,site-per-process,SitePerProcess',
-            '--flag-switches-begin --disable-site-isolation-trials --flag-switches-end'
-        ]
     });
 
-    const [page] = await browser.pages();
+    // Create a new page
+    const page = await browser.newPage();
 
-    // Click sign in button
+    // Go to the login page, targeting the in-store login
+    await page.goto('https://www.rakuten.com/account/login?targetpage=%2Fin-store');
+
+    // Wait for the page to load
+    await delay(3000);
+
+    // Wait for the modal to appear
+    await page.waitForSelector('.chakra-modal__content-container');
+
+    // Wait for the iframe inside the modal to load
+    const iframeElement = await page.waitForSelector('iframe#auth-microsite-iframe-inline');
+
+    // Get the iframe's content frame
+    const iframe = await iframeElement.contentFrame();
+
+    // Wait for the email input inside the iframe
+    await iframe.waitForSelector('input[name="emailAddress"]');
+
+    // Type the email into the email input
+    await iframe.type('input[name="emailAddress"]', process.env.LOGIN_EMAIL);
+
+    // Type the password into the password input
+    await iframe.type('input[name="password"]', process.env.LOGIN_PASSWORD);
+
+    // Allow time for the reCAPTCHA to load
+    await delay(5000);
+
+    // Solve the reCAPTCHA challenge
     try {
-        await page.waitForSelector('.btn-sign-in', {
-            timeout: 3000
-        });
-        await page.click('.btn-sign-in');
-    } catch {
-        browser.close();
-        linkOffers();
-        return;
+        await iframe.solveRecaptchas();
+    } catch (error) {
+        console.log('Error solving reCAPTCHA:', error);
     }
 
+    // Wait for the sign in button to be available and click it
+    await iframe.waitForSelector('#email-auth-btn');
+    await iframe.click('#email-auth-btn');
 
-    // Enter email
+    // Wait for the response or page navigation
     try {
-        await page.waitForSelector('.validation-required.auto-correct.email-address.text', {
-            timeout: 5000
-        });
-        await page.type(".validation-required.auto-correct.email-address.text", process.env.LOGIN_EMAIL);
-    } catch {
-        browser.close();
-        linkOffers();
-        return;
+        await page.waitForNavigation({ waitUntil: 'networkidle0' });
+    } catch (error) {
+        console.log('Error during navigation:', error);
     }
 
-    // Enter password
+    // Successfully logged in
+    console.log('Logged in successfully!');
+
+    // Check and remove the popup if it appears
     try {
-        await page.waitForSelector('.text.validation-required.password', {
-            timeout: 5000
-        });
-        await page.type(".text.validation-required.password", process.env.LOGIN_PASSWORD);
+        await page.waitForSelector('.chakra-modal__content-container', { timeout: 5000 });
+        await page.click('.chakra-modal__close-btn');
     } catch {
-        browser.close();
-        linkOffers();
-        return;
+        // console.log('No popup appeared');
     }
 
-    // Solve reCAPTCHA
-    page.solveRecaptchas();
+    // Click the "See More" button if it exists
+    while (true) {
+        // Get all the buttons on the page
+        const buttons = await page.$$('button');
+        let seeMoreButtons = [];
 
-    let recaptchaSolved = false;
+        // Iterate over all the buttons to check for "See More"
+        for (let button of buttons) {
+            const buttonText = await page.evaluate(button => button.innerText, button);
+            if (buttonText.includes('See More')) {
+                seeMoreButtons.push(button);
+            }
+        }
 
-    // Check if reCAPTCHA is solved in intervals of 10 seconds with a maximum wait time of 2 minutes
-    for (let i = 0; i < 12; i++) {
-        let recaptchaResponseElement = await page.$('#g-recaptcha-response');
-        let recaptchaResponse = await recaptchaResponseElement.evaluate(el => el.textContent);
+        // If there are multiple "See More" buttons, click the first one
+        if (seeMoreButtons.length > 1) {
+            await seeMoreButtons[0].click();
 
-        if (recaptchaResponse.length <= 0) {
-            await delay(10000);
+            // Wait for the page to load after clicking
+            await delay(3000);
         } else {
-            recaptchaSolved = true;
             break;
         }
     }
 
-    if (!recaptchaSolved) {
-        browser.close();
-        linkOffers();
-        return;
-    }
+    // Wait for all "Add" buttons and click them
+    const addButtons = await page.$$('button');
+    for (let i = 0; i < addButtons.length; i++) {
+        const buttonText = await page.evaluate(button => button.innerText, addButtons[i]);
 
-    // Submit sign in form
-    try {
-        await page.waitForSelector('.button.primary.stretch.join-button.submit-button', {
-            timeout: 5000
-        });
-        await page.click('.button.primary.stretch.join-button.submit-button');
-    } catch {
-        browser.close();
-        linkOffers();
-        return;
-    }
+        if (buttonText === 'Add') {
+            try {
+                // Click the "Add" button
+                await addButtons[i].click();
 
-    await delay(1000);
-
-    try {
-        await page.waitForSelector('#h-search > div > div > div > ul > li > a > span.user-name > svg', {
-            timeout: 5000
-        });
-    } catch {
-        browser.close();
-        linkOffers();
-        return;
-    }
-
-    // Get offer count
-    await page.waitForSelector('.frt.f-16.lh-20.mar-20-r.mar-15-t', {
-        timeout: 0
-    });
-    let offerCountElement = await page.$('.frt.f-16.lh-20.mar-20-r.mar-15-t');
-    let offerCountString = await offerCountElement.evaluate(el => el.textContent);
-    let offerCount = parseInt(offerCountString.replace(/[^0-9]/g, ''));
-
-    // Loop through offers and link them
-    for (let i = 1; i < offerCount + 1; i++) {
-        try {
-            let linkButton = '#clo-offers-cont > div:nth-child(' + i + ') > a.button.primary.ghost.int.mar-10-b.w-123.link-offer.no-select.msg-dismissive.int'
-            await page.waitForSelector(linkButton, {
-                timeout: 0
-            });
-            let offerStatusElement = await page.$(linkButton);
-            let offerStatus = await offerStatusElement.evaluate(el => el.textContent);
-
-            if (offerStatus == "Link Offer") {
-                await page.click(linkButton);
-                try {
-                    await page.waitForSelector('.fa-check-circle', {
-                        timeout: 5000,
-                        visible: true
-                    });
-                } catch {
-                    await page.click(linkButton);
-                }
-                await page.click(linkButton);
-                await console.log('Successfully linked offer')
-                await delay(1000);
+                // Wait for the network to be idle after clicking the button
+                await page.waitForNetworkIdle({ timeout: 10000 }); // Timeout after 10 seconds if network doesn't become idle
+            } catch (error) {
+                //console.log(`Error clicking "Add" button ${i + 1}:`, error);
             }
-        } catch {
-            continue;
         }
     }
 
-    await console.log('Finished linking offers');
     await browser.close();
-}
-
-setInterval(function () {
-    linkOffers();
-}, 43200000);
-
-linkOffers();
+})();
