@@ -13,6 +13,7 @@ puppeteerExtra.use(RecaptchaPlugin({
 (async () => {
     // Launch the browser with puppeteerExtra
     const browser = await puppeteerExtra.launch({
+        executablePath: '/usr/bin/google-chrome',
         headless: false,
         defaultViewport: null,
     });
