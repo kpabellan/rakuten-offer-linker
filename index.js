@@ -14,7 +14,7 @@ puppeteerExtra.use(RecaptchaPlugin({
     // Launch the browser with puppeteerExtra
     const browser = await puppeteerExtra.launch({
         executablePath: '/usr/bin/google-chrome',
-        headless: false,
+        headless: true,
         defaultViewport: null,
     });
 
@@ -67,7 +67,7 @@ puppeteerExtra.use(RecaptchaPlugin({
     }
 
     // Successfully logged in
-    console.log('Logged in successfully!');
+    console.log('Logged in');
 
     // Check and remove the popup if it appears
     try {
@@ -114,11 +114,15 @@ puppeteerExtra.use(RecaptchaPlugin({
 
                 // Wait for the network to be idle after clicking the button
                 await page.waitForNetworkIdle({ timeout: 10000 }); // Timeout after 10 seconds if network doesn't become idle
+
+                console.log('Added offer');
             } catch (error) {
                 //console.log(`Error clicking "Add" button ${i + 1}:`, error);
             }
         }
     }
+
+    console.log('Finished adding offers');
 
     await browser.close();
 })();
