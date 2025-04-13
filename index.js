@@ -116,8 +116,16 @@ puppeteerExtra.use(RecaptchaPlugin({
 
                 // Wait for the network to be idle after clicking the button
                 await page.waitForNetworkIdle({ timeout: 10000 }); // Timeout after 10 seconds if network doesn't become idle
-            } catch (error) {
-                //console.log(`Error clicking "Add" button ${i + 1}:`, error);
+            } catch {
+                // Check and remove the popup if it appears
+                try {
+                    await page.waitForSelector('.chakra-modal__content-container', { timeout: 1000 });
+                    await page.click('.chakra-modal__close-btn');
+                } catch {
+                    // console.log('No popup appeared');
+                }
+
+                await delay(1000);
             }
         }
     }
