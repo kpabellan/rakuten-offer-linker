@@ -112,10 +112,10 @@ puppeteerExtra.use(RecaptchaPlugin({
                 // Click the "Add" button
                 await addButtons[i].click();
 
-                console.log('Added offer');
-
                 // Wait for the network to be idle after clicking the button
                 await page.waitForNetworkIdle({ timeout: 10000 }); // Timeout after 10 seconds if network doesn't become idle
+
+                console.log('Added offer');
             } catch {
                 // Check and remove the popup if it appears
                 try {
