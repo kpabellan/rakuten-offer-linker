@@ -122,12 +122,12 @@ puppeteerExtra.use(RecaptchaPlugin({
                     await page.waitForSelector('.chakra-modal__content-container', { timeout: 1000 });
                     await page.click('.chakra-modal__close-btn');
                 } catch {
-                    //console.log('No popup appeared');
+                    // console.log('No popup appeared');
                 }
 
                 await delay(1000);
             } catch {
-                //console.log('Error clicking add button:', error);
+                // console.log('Error clicking add button:', error);
             }
         }
     }
