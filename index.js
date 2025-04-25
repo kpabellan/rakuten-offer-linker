@@ -1,3 +1,4 @@
+const puppeteer = require('puppeteer');
 const puppeteerExtra = require('puppeteer-extra');
 const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha');
 require('dotenv').config();
@@ -13,7 +14,6 @@ puppeteerExtra.use(RecaptchaPlugin({
 (async () => {
     // Launch the browser with puppeteerExtra
     const browser = await puppeteerExtra.launch({
-        executablePath: '/usr/bin/google-chrome',
         headless: true,
         defaultViewport: null,
     });
