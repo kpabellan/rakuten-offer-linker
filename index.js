@@ -5,134 +5,160 @@ require('dotenv').config();
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Add the Recaptcha plugin to puppeteerExtra
+const sendWebhook = async (payload) => {
+    const url = process.env.WEBHOOK_URL;
+    if (!url) return;
+    try {
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+    } catch (error) {
+        console.log('Webhook error:', error.message);
+    }
+};
+
 puppeteerExtra.use(RecaptchaPlugin({
     provider: { id: '2captcha', token: process.env.TWO_CAPTCHA_KEY },
     visualFeedback: true,
 }));
 
 (async () => {
-    // Launch the browser with puppeteerExtra
     const browser = await puppeteerExtra.launch({
         headless: true,
-        defaultViewport: null,
+        defaultViewport: { width: 1920, height: 1080 },
+        slowMo: 50,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--window-size=1920,1080',
+        ],
     });
 
-    // Create a new page
     const page = await browser.newPage();
 
-    // Go to the login page, targeting the in-store login
     await page.goto('https://www.rakuten.com/account/login?targetpage=%2Fin-store');
-
-    // Wait for the page to load
     await delay(3000);
 
-    // Wait for the modal to appear
+    // --- Login flow ---
     await page.waitForSelector('.chakra-modal__content-container');
-
-    // Wait for the iframe inside the modal to load
     const iframeElement = await page.waitForSelector('iframe#auth-microsite-iframe-inline');
-
-    // Get the iframe's content frame
     const iframe = await iframeElement.contentFrame();
 
-    // Wait for the email input inside the iframe
     await iframe.waitForSelector('input[name="emailAddress"]');
-
-    // Type the email into the email input
     await iframe.type('input[name="emailAddress"]', process.env.LOGIN_EMAIL);
-
-    // Type the password into the password input
     await iframe.type('input[name="password"]', process.env.LOGIN_PASSWORD);
 
-    // Allow time for the reCAPTCHA to load
     await delay(5000);
 
-    // Solve the reCAPTCHA challenge
     try {
         await iframe.solveRecaptchas();
     } catch (error) {
         console.log('Error solving reCAPTCHA:', error);
     }
 
-    // Wait for the sign in button to be available and click it
     await iframe.waitForSelector('#email-auth-btn');
     await iframe.click('#email-auth-btn');
 
-    // Wait for the response or page navigation
     try {
         await page.waitForNavigation({ waitUntil: 'networkidle0' });
     } catch (error) {
         console.log('Error during navigation:', error);
     }
 
-    // Successfully logged in
     console.log('Logged in');
 
-    // Check and remove the popup if it appears
+    // Dismiss any post-login popup
     try {
         await page.waitForSelector('.chakra-modal__content-container', { timeout: 5000 });
         await page.click('.chakra-modal__close-btn');
-    } catch {
-        // console.log('No popup appeared');
-    }
+    } catch {}
 
-    // Click the "See More" button if it exists
+    // --- Expand all offers via "See More" ---
     while (true) {
-        // Get all the buttons on the page
-        const buttons = await page.$$('button');
-        let seeMoreButtons = [];
+        const tilesBefore = await page.$$eval(
+            'div[data-testid="offer_tile"]',
+            els => els.length
+        );
 
-        // Iterate over all the buttons to check for "See More"
-        for (let button of buttons) {
-            const buttonText = await page.evaluate(button => button.innerText, button);
-            if (buttonText.includes('See More')) {
-                seeMoreButtons.push(button);
-            }
-        }
+        const clicked = await page.evaluate(() => {
+            const btn = Array.from(document.querySelectorAll('button'))
+                .find(b => b.offsetParent !== null && b.innerText.trim().startsWith('See More'));
+            if (!btn) return false;
+            btn.scrollIntoView({ block: 'center' });
+            btn.click();
+            return true;
+        });
 
-        // If there are multiple "See More" buttons, click the first one
-        if (seeMoreButtons.length > 1) {
-            await seeMoreButtons[0].click();
+        if (!clicked) break;
 
-            // Wait for the page to load after clicking
-            await delay(3000);
-        } else {
-            break;
-        }
+        await delay(3000);
+
+        const tilesAfter = await page.$$eval(
+            'div[data-testid="offer_tile"]',
+            els => els.length
+        );
+        if (tilesAfter === tilesBefore) break;
     }
 
-    // Wait for all "Add" buttons and click them
-    const addButtons = await page.$$('button');
-    for (let i = 0; i < addButtons.length; i++) {
-        const buttonText = await page.evaluate(button => button.innerText, addButtons[i]);
+    console.log('All offers loaded');
 
-        if (buttonText === 'Add') {
-            try {
-                // Click the "Add" button
-                await addButtons[i].click();
+    // --- Click every "Add" button on an available offer ---
+    const clickedOffers = new Set();
 
-                // Wait for 10 seconds to allow the offer to be added
-                await delay(10000);
-
-                console.log('Added offer');
-                
-                // Check and remove the popup if it appears
-                try {
-                    await page.waitForSelector('.chakra-modal__content-container', { timeout: 1000 });
-                    await page.click('.chakra-modal__close-btn');
-                } catch {
-                    // console.log('No popup appeared');
+    while (true) {
+        const offerId = await page.evaluate((alreadyClicked) => {
+            const tiles = Array.from(
+                document.querySelectorAll('div[data-testid="offer_tile"][offerstatus="available"]')
+            );
+            for (const tile of tiles) {
+                if (alreadyClicked.includes(tile.id)) continue;
+                const card = tile.closest('.chakra-linkbox');
+                const addBtn = card?.querySelector('button[data-testid="add_offer_button"]');
+                if (addBtn) {
+                    addBtn.scrollIntoView({ block: 'center' });
+                    addBtn.click();
+                    return tile.id;
                 }
-
-                await delay(1000);
-            } catch {
-                // console.log('Error clicking add button:', error);
             }
-        }
+            return null;
+        }, Array.from(clickedOffers));
+
+        if (!offerId) break;
+
+        clickedOffers.add(offerId);
+        console.log(`Added offer ${offerId} (${clickedOffers.size} total)`);
+
+        await delay(5000);
+
+        // Dismiss popup if one appeared
+        try {
+            await page.waitForSelector('.chakra-modal__content-container', { timeout: 1000 });
+            await page.click('.chakra-modal__close-btn');
+        } catch {}
+
+        await delay(1000);
     }
 
-    console.log('Finished adding offers');
+    console.log(`Finished — added ${clickedOffers.size} offers`);
+
+    await sendWebhook({
+        embeds: [{
+            title: 'Rakuten Offer Linker',
+            description: clickedOffers.size > 0
+                ? `Added **${clickedOffers.size}** offer${clickedOffers.size !== 1 ? 's' : ''}`
+                : 'No new offers were available to add',
+            color: clickedOffers.size > 0 ? 0x00c851 : 0xaaaaaa,
+            fields: clickedOffers.size > 0 ? [{
+                name: 'Offer IDs',
+                value: Array.from(clickedOffers).join('\n'),
+            }] : [],
+            timestamp: new Date().toISOString(),
+        }],
+    });
 
     await browser.close();
 })();
