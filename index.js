@@ -27,15 +27,7 @@ puppeteerExtra.use(RecaptchaPlugin({
 (async () => {
     const browser = await puppeteerExtra.launch({
         headless: true,
-        defaultViewport: { width: 1920, height: 1080 },
-        slowMo: 50,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--window-size=1920,1080',
-        ],
+        defaultViewport: null,
     });
 
     const page = await browser.newPage();
